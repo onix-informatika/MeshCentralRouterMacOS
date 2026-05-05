@@ -93,7 +93,7 @@ struct TokenView: View {
                     .padding()
                     .disabled(!(tokenStr.count > 0))
             }.background(Image("BottomBanner")).frame(width: 494, height: 41)
-        }.frame(width: 494, height: 360)
+        }.frame(width: 494).frame(minHeight: 360, maxHeight: .infinity)
     }
 }
 

@@ -28,7 +28,9 @@ var globalVersionStr:String = (Bundle.main.object(forInfoDictionaryKey: "CFBundl
 var globalAuthUrl:String? = nil
 var globalAuthParams:[String:String] = [String:String]()
 var globalAutoOpenUrl:URL? = nil
+var globalAutoOpenFileUrl:URL? = nil
 var globalAutoConnect:Bool = false
+let startupRouterFilePathKey = "startupRouterFilePath"
 
 func substring(string: String, fromIndex: Int, toIndex: Int) -> String? {
     if fromIndex < toIndex && toIndex <= string.count {
@@ -37,6 +39,20 @@ func substring(string: String, fromIndex: Int, toIndex: Int) -> String? {
         return String(string[startIndex..<endIndex])
     } else {
         return nil
+    }
+}
+
+func routerFileUrl(from arg:String) -> URL? {
+    if (arg.lowercased().hasSuffix(".mcrouter") == false) { return nil }
+    if let url = URL(string: arg), url.isFileURL { return url }
+    return URL(fileURLWithPath: (arg as NSString).expandingTildeInPath)
+}
+
+func openRouterFileWhenReady(url:URL) {
+    if (loginView != nil) {
+        openFile(url:url)
+    } else {
+        globalAutoOpenFileUrl = url
     }
 }
 
@@ -51,11 +67,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var serverUser:String? = settings.string(forKey: "serverUser")
         var serverPass:String? = nil
         var automationFlags = 0
-        //var openfile:URL? = nil
         
         // Parse inbound arguments
         for arg:String in CommandLine.arguments {
             if (arg.starts(with: "mcrouter://")) { globalAutoOpenUrl = URL(string:arg)! }
+            if let url = routerFileUrl(from: arg) { globalAutoOpenFileUrl = url }
             if (arg.starts(with: "-host:")) {
                 serverName = substring(string:arg, fromIndex: 6, toIndex: arg.count)
                 if (serverName!.count > 0) { automationFlags += 1 }
@@ -68,16 +84,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 serverPass = substring(string:arg, fromIndex: 6, toIndex: arg.count)
                 if (serverPass!.count > 0) { automationFlags += 4 }
             }
-            /*
-            if (arg.hasSuffix(".mcrouter") && (arg.count > 9)) {
-                if (arg.starts(with: "file://")) {
-                    openfile = URL(string: arg)
-                } else {
-                    openfile = URL(string: "file://" + arg)
+        }
+
+        if (globalAutoOpenFileUrl == nil) {
+            if let startupFilePath = settings.string(forKey: startupRouterFilePathKey) {
+                let path = (startupFilePath as NSString).expandingTildeInPath
+                if (FileManager.default.fileExists(atPath: path)) {
+                    globalAutoOpenFileUrl = URL(fileURLWithPath: path)
                 }
             }
-            */
         }
+
         // If host, user and pass are passed in as arguments, trigger auto-connect
         globalAutoConnect = (automationFlags == 7)
         
@@ -91,21 +108,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Create the window and set the content view.
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 494, height: 360),
-            //styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            styleMask: [.titled, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 494, height: 425),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         
         window.isReleasedWhenClosed = false
+        window.contentMinSize = NSSize(width: 494, height: 425)
+        window.contentMaxSize = NSSize(width: 494, height: CGFloat.greatestFiniteMagnitude)
         window.center()
         // Disable automatic window restoration to prevent restoration warnings
         window.restorationClass = nil
         window.identifier = nil
         window.contentView = NSHostingView(rootView: parentView)
         window.makeKeyAndOrderFront(nil)
-        
-        // Open a file if needed
-        //if (openfile != nil) { openFile(url:openfile!) }
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {
@@ -122,29 +137,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         //print("OpenUrl: \(urls[0])")
-        if (urls[0].scheme == "file") {
-            openFile(url: urls[0])
-        } else if (urls[0].scheme == "mcrouter") {
-            if ((mc != nil) || ((loginView != nil) && (parentView?.panel != 0))) { return; }
-            if (loginView != nil) {
-                performAutoLogin(u:urls[0])
-            } else {
-                globalAutoOpenUrl = urls[0]
+        for url in urls {
+            if (url.scheme == "file") {
+                openRouterFileWhenReady(url:url)
+            } else if (url.scheme == "mcrouter") {
+                if ((mc != nil) || ((loginView != nil) && (parentView?.panel != 0))) { return; }
+                if (loginView != nil) {
+                    performAutoLogin(u:url)
+                } else {
+                    globalAutoOpenUrl = url
+                }
             }
         }
     }
     
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         //print("OpenFile: \(filename)")
-        openFile(url: URL(string: "file://" + filename)!)
+        openRouterFileWhenReady(url: URL(fileURLWithPath: filename))
         return true
     }
  
-    /*
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
-        print("A")
+        for filename in filenames {
+            openRouterFileWhenReady(url: URL(fileURLWithPath: filename))
+        }
+        sender.reply(toOpenOrPrint: .success)
     }
-    */
     
     func application(_ sender: NSApplication, openTempFile filename: String) -> Bool {
         //print("B")
@@ -264,6 +282,7 @@ func openFile(url:URL) {
     var readString = ""
     do {
         readString = try String(contentsOf: url)
+        settings.setValue(url.path, forKey: startupRouterFilePathKey)
     } catch let error as NSError {
         dialogWarningMessage(message: "File error", text: "\(error)")
         return
@@ -281,7 +300,7 @@ func openFile(url:URL) {
         if ((host != nil) && (user != nil)) {
             // Disconnect if needed
             performBackToLogin()
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 loginView!.serverName = host ?? ""
                 loginView!.serverUser = user ?? ""
                 loginView!.serverPass = pass ?? ""
@@ -328,7 +347,12 @@ func openFile(url:URL) {
 func setGlobalViews(parent:ContentView, view:LoginView) {
     parentView = parent
     loginView = view
-    if (globalAutoOpenUrl != nil) {
+    if (globalAutoOpenFileUrl != nil) {
+        // A MeshCentral Router file was passed in or remembered, use it to auto-login.
+        let url = globalAutoOpenFileUrl!
+        globalAutoOpenFileUrl = nil
+        openFile(url:url)
+    } else if (globalAutoOpenUrl != nil) {
         // A MeshCentral cookie URL was passed it, use that to auto-login
         performAutoLogin(u:globalAutoOpenUrl!)
         globalAutoOpenUrl = nil
@@ -572,4 +596,3 @@ func logout() {
     if (mc != nil) { mc!.close() }
     globalAutoMaps = nil
 }
-

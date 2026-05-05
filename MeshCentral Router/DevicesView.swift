@@ -15,6 +15,12 @@ extension DevicesView {
     }
 }
 
+private struct DeviceListSection: Identifiable {
+    let id: String
+    let name: String
+    let devices: [Device]
+}
+
 struct DevicesView: View {
     @State var selectedTab: Tab = .devices
     @State var deviceFilter:String = ""
@@ -42,29 +48,31 @@ struct DevicesView: View {
         //UIApplication
     }
     
-    func FilterCountAll() -> Int {
-        guard let mc = mc else { return 0 }
-        var r:Int = 0
-        for dev:Device in mc.devices {
-            if (CheckFilter(device:dev)) { r += 1 }
-        }
-        return r
-    }
-    
-    func FilterCount(meshid:String) -> Int {
-        guard let mc = mc else { return 0 }
-        var r:Int = 0
-        for dev:Device in mc.devices {
-            if ((meshid == dev.meshid) && (CheckFilter(device:dev))) { r += 1 }
-        }
-        return r
-    }
-    
-    func CheckFilter(device:Device) -> Bool {
+    private func checkFilter(device:Device, filter:String) -> Bool {
         if (globalShowOnlyOnlineDevices && ((device.conn & 1) == 0)) { return false }
-        if (deviceFilter == "") { return true }
-        if (device.name.lowercased().contains(deviceFilter.lowercased())) { return true; }
-        return false
+        if (filter == "") { return true }
+        return device.name.range(of: filter, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }
+
+    private func buildDeviceSections(mc:MeshCentralServer) -> [DeviceListSection] {
+        let filter = deviceFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+        var devicesByGroup:[String:[Device]] = [:]
+        devicesByGroup.reserveCapacity(mc.deviceGroups.count)
+
+        for dev:Device in mc.devices {
+            if (checkFilter(device:dev, filter:filter)) {
+                devicesByGroup[dev.meshid, default: []].append(dev)
+            }
+        }
+
+        var sections:[DeviceListSection] = []
+        sections.reserveCapacity(mc.deviceGroups.count)
+        for grp:DeviceGroup in mc.deviceGroups {
+            if let devices = devicesByGroup[grp.id], devices.count > 0 {
+                sections.append(DeviceListSection(id: grp.id, name: grp.name, devices: devices))
+            }
+        }
+        return sections
     }
     
     func getStateString(device:Device) -> String {
@@ -76,69 +84,87 @@ struct DevicesView: View {
         if ((device.conn & 16) != 0) { r.append("MQTT") }
         return r.joined(separator: ", ")
     }
+
+    private func deviceToolbar() -> some View {
+        HStack {
+            TextField("Filter", text: $deviceFilter)
+                .frame(width: 220)
+                .foregroundColor(Color("MainTextColor"))
+                .onExitCommand(perform: {
+                    deviceFilter = ""
+                })
+            Spacer()
+            Button("Settings...", action: { showSettingsModal = true }).sheet(isPresented: $showSettingsModal) {
+                SettingsDialogView(devicesView:self)
+            }
+            .buttonStyle(BorderedButtonStyle())
+        }.padding(.horizontal, 10).padding(.top, 4).frame(width: 494, height: 32)
+    }
+
+    @ViewBuilder
+    private func devicesContent(mc:MeshCentralServer) -> some View {
+        let sections = buildDeviceSections(mc: mc)
+
+        if (sections.count == 0) {
+            Text(deviceFilter.trimmingCharacters(in: .whitespacesAndNewlines) == "" ? "No devices" : "No filtered devices")
+                .foregroundColor(Color("MainTextColor"))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List() {
+                ForEach(sections) { section in
+                    Section(header: Text(section.name).foregroundColor(Color("MainTextColor"))) {
+                        ForEach(section.devices, id: \.id) { device in
+                            deviceRow(device:device)
+                        }
+                    }
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func deviceRow(device:Device) -> some View {
+        HStack() {
+            Image("Device\(device.icon)")
+                .opacity(((device.conn & 1) != 0) ? 1 : 0.3)
+                .saturation(((device.conn & 1) != 0) ? 1 : 0)
+            VStack(alignment: .leading) {
+                Text(device.name)
+                Text(getStateString(device:device))
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            if ((device.conn & 1) != 0) {
+                Button("Add map...") { [weak device] in
+                    guard let device = device else { return }
+                    globalSelectedDevice = device
+                    showAddMapModal = true
+                }
+            }
+        }.padding(.horizontal, 5).background(Color("MainItemColor")).cornerRadius(4).contextMenu() {
+            if ((device.conn & 1) != 0) {
+                Button("Add map...") { [weak device] in
+                    guard let device = device else { return }
+                    globalSelectedDevice = device
+                    showAddMapModal = true
+                }
+                Button("Add relay map...") { [weak device] in
+                    guard let device = device else { return }
+                    globalSelectedDevice = device
+                    showAddRelayMapModal = true
+                }
+            }
+        }
+    }
     
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
                 TabView(selection: $selectedTab) {
                     VStack(spacing: 0) {
+                        deviceToolbar()
                         if let mc = mc, mc.devices.count > 0 {
-                            if (FilterCountAll() == 0) {
-                                Text("No filtered devices").foregroundColor(Color("MainTextColor")).frame(maxWidth: .infinity, maxHeight: .infinity)
-                            } else {
-                                List() {
-                                    ForEach(mc.deviceGroups, id: \.id) { deviceGroup in
-                                        if (FilterCount(meshid:deviceGroup.id) > 0) {
-                                            Text(deviceGroup.name).foregroundColor(Color("MainTextColor"))
-                                        }
-                                        ForEach(mc.devices, id: \.id) { device in
-                                            if ((device.meshid == deviceGroup.id) && CheckFilter(device:device)) {
-                                                HStack() {
-                                                    Image("Device\(device.icon)").opacity(((device.conn & 1) != 0) ? 1 : 0.3).saturation(((device.conn & 1) != 0) ? 1 : 0)
-                                                    VStack(alignment: .leading) {
-                                                        Text(device.name)
-                                                        Text(getStateString(device:device))
-                                                    }.frame(maxWidth: .infinity, alignment: .leading)
-                                                    if ((device.conn & 1) != 0) {
-                                                        Button("Add map...") { [weak device] in
-                                                            guard let device = device else { return }
-                                                            globalSelectedDevice = device
-                                                            showAddMapModal = true
-                                                        }
-                                                    }
-                                                }.padding(.horizontal, 5).background(Color("MainItemColor")).cornerRadius(4).contextMenu() {
-                                                    if ((device.conn & 1) != 0) {
-                                                        Button("Add map...") { [weak device] in
-                                                            guard let device = device else { return }
-                                                            globalSelectedDevice = device
-                                                            showAddMapModal = true
-                                                        }
-                                                        Button("Add relay map...") { [weak device] in
-                                                            guard let device = device else { return }
-                                                            globalSelectedDevice = device
-                                                            showAddRelayMapModal = true
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
+                            devicesContent(mc: mc)
                         } else {
                             Text("No devices").foregroundColor(Color("MainTextColor")).frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                        HStack {
-                            TextField("Filter", text: $deviceFilter).frame(width: 160).foregroundColor(Color("MainTextColor")).onExitCommand(perform: {
-                                print("Exit from top text field")
-                                deviceFilter = ""
-                            })
-                            Spacer()
-                            Button("Settings...", action: { showSettingsModal = true }).sheet(isPresented: $showSettingsModal) {
-                                SettingsDialogView(devicesView:self)
-                            }
-                            .buttonStyle(BorderedButtonStyle())
-                        }.padding(.horizontal, 10).padding(.top, 4).frame(width: 494, height: 26)
                     }.tabItem {
                         Text("Devices")
                     }.tag(Tab.devices)
@@ -229,7 +255,8 @@ struct DevicesView: View {
                 AppMapDialogView(devicesView:self, device: globalSelectedDevice, relay: false)
             }
         }
-        .frame(width: 494, height: 360)
+        .frame(width: 494)
+        .frame(minHeight: 360, maxHeight: .infinity)
         .background(Color("MainBackground"))
         .foregroundColor(Color("MainTextColor"))
         .onAppear(perform: { devicesScreenDisplayed(devicesView:self) })

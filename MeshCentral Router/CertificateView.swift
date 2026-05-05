@@ -32,7 +32,7 @@ struct CertificateView: View {
                 Button("Back", action: performBackToLogin).buttonStyle(BorderedButtonStyle()).padding()
                 Button("Ignore", action: { performIgnoreCert(remember:isRememberChecked) }).buttonStyle(BorderedButtonStyle()).padding()
             }.background(Image("BottomBanner")).frame(width: 494, height: 41)
-        }.frame(width: 494, height: 360).background(Color("MainBackground")).foregroundColor(Color("MainTextColor"))
+        }.frame(width: 494).frame(minHeight: 360, maxHeight: .infinity).background(Color("MainBackground")).foregroundColor(Color("MainTextColor"))
     }
 }
 

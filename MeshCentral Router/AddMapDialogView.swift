@@ -37,24 +37,61 @@ struct AppMapDialogView: View {
     
     func getFirstValidDevice() -> Device? {
         guard let mc = mc else { return nil }
+        let devicesByGroup = buildOnlineDevicesByGroup(mc: mc)
         for grp:DeviceGroup in mc.deviceGroups {
-            for dev:Device in mc.devices {
-                if ((dev.meshid == grp.id) && ((dev.conn & 1) != 0)) { return dev }
-            }
+            if let devices = devicesByGroup[grp.id], let dev = devices.first { return dev }
         }
         return nil
     }
-    
-    func checkDeviceGroupValid(grp:DeviceGroup) -> Bool {
-        guard let mc = mc else { return false }
+
+    private func buildOnlineDevicesByGroup(mc:MeshCentralServer) -> [String:[Device]] {
+        var devicesByGroup:[String:[Device]] = [:]
+        devicesByGroup.reserveCapacity(mc.deviceGroups.count)
         for dev:Device in mc.devices {
-            if ((dev.meshid == grp.id) && ((dev.conn & 1) != 0)) { return true }
+            if ((dev.conn & 1) != 0) {
+                devicesByGroup[dev.meshid, default: []].append(dev)
+            }
         }
-        return false
+        return devicesByGroup
+    }
+
+    private func validDeviceGroups(mc:MeshCentralServer) -> [DeviceGroup] {
+        let devicesByGroup = buildOnlineDevicesByGroup(mc: mc)
+        return mc.deviceGroups.filter { devicesByGroup[$0.id]?.isEmpty == false }
+    }
+
+    private func validDevices(mc:MeshCentralServer, meshid:String) -> [Device] {
+        return mc.devices.filter { (($0.meshid == meshid) && (($0.conn & 1) != 0)) }
     }
     
-    func checkDeviceValid(dev:Device) -> Bool {
-        return ((dev.meshid == meshid) && ((dev.conn & 1) != 0))
+    private func normalizeSelectedDevice(mc:MeshCentralServer, meshid:String) {
+        let devices = validDevices(mc: mc, meshid: meshid)
+        if (devices.contains { $0.id == nodeid }) { return }
+        nodeid = devices.first?.id ?? ""
+    }
+
+    private func deviceGroupPicker(mc:MeshCentralServer) -> some View {
+        let groups = validDeviceGroups(mc: mc)
+        return Picker("", selection: $meshid) {
+            ForEach(groups, id: \.id) { deviceGroup in
+                Text(deviceGroup.name).tag(deviceGroup.id)
+            }
+        }.labelsHidden().frame(width: 200)
+            .onAppear {
+                normalizeSelectedDevice(mc: mc, meshid: meshid)
+            }
+            .onChange(of: meshid) { newMeshId in
+                normalizeSelectedDevice(mc: mc, meshid: newMeshId)
+            }
+    }
+
+    private func devicePicker(mc:MeshCentralServer) -> some View {
+        let devices = validDevices(mc: mc, meshid: meshid)
+        return Picker("", selection: $nodeid) {
+            ForEach(devices, id: \.id) { device in
+                Text(device.name).tag(device.id)
+            }
+        }.labelsHidden().frame(width: 200)
     }
     
     var body: some View {
@@ -74,26 +111,14 @@ struct AppMapDialogView: View {
                     Text("Device Group").frame(width: 100, alignment: .leading)
                     Spacer()
                     if let mc = mc {
-                        Picker("", selection: $meshid) {
-                            ForEach(mc.deviceGroups, id: \.id) { deviceGroup in
-                                if (checkDeviceGroupValid(grp: deviceGroup)) {
-                                    Text(deviceGroup.name).tag(deviceGroup.id)
-                                }
-                            }
-                        }.labelsHidden().frame(width: 200)
+                        deviceGroupPicker(mc: mc)
                     }
                 }
                 HStack() {
                     Text("Device").frame(width: 100, alignment: .leading)
                     Spacer()
                     if let mc = mc {
-                        Picker("", selection: $nodeid) {
-                            ForEach(mc.devices, id: \.id) { device in
-                                if (checkDeviceValid(dev:device)) {
-                                    Text(device.name).tag(device.id)
-                                }
-                            }
-                        }.labelsHidden().frame(width: 200)
+                        devicePicker(mc: mc)
                     }
                 }
                 HStack() {

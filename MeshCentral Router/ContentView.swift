@@ -30,7 +30,7 @@ struct ContentView: View {
             if (panel == 1) { TokenView(parent: self, loginStatus: loginStatus, tokenTypes: tokenTypes, cookieDays: cookieDays) }
             if (panel == 2) { CertificateView(parent: self, certificateData: certificateData) }
             if (panel == 3) { DevicesView() }
-        }
+        }.frame(width: 494).frame(minHeight: 425, maxHeight: .infinity)
     }
 }
 

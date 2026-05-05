@@ -69,7 +69,7 @@ struct LoginView: View {
                     .disabled(!(((serverName.count > 0) && (serverUser.count > 0) && (serverPass.count > 0)) && fieldsEnabled))
             }.background(Image("BottomBanner")).frame(width: 494, height: 41)
         }
-        .frame(width: 494, height: 360).onAppear(perform: { setGlobalViews(parent:parent!, view:self) })
+        .frame(width: 494).frame(minHeight: 360, maxHeight: .infinity).onAppear(perform: { setGlobalViews(parent:parent!, view:self) })
         .onAppear(perform: { loginScreenDisplayed(loginView:self) })
     }
 }

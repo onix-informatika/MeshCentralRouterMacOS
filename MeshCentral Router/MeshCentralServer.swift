@@ -145,9 +145,16 @@ public class Device {
 // Used to notifiy listening objects that the MeshCentral server state has changed
 var meshCentralServerChanger:MeshCentralServerChanger = MeshCentralServerChanger()
 public class MeshCentralServerChanger: ObservableObject {
+    private var updateScheduled: Bool = false
+
     func update() {
         DispatchQueue.main.async {
-            self.objectWillChange.send()
+            if (self.updateScheduled == true) { return }
+            self.updateScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.updateScheduled = false
+                self.objectWillChange.send()
+            }
         }
     }
 }
